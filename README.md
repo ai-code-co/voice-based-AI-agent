@@ -1,4 +1,4 @@
-# voice-based-ai-agent
+<!-- daphne -p 8000 voice_agent_backend.asgi:application# voice-based-ai-agent/ -->
 # voice-based-AI-agent
 1. Project structure (Django + Channels)
 
@@ -61,3 +61,98 @@ REDIS_URL=redis://127.0.0.1:6379/0   # for channels-redis
 
 
 (You need Redis running for Channels; for dev: docker run -p 6379:6379 redis or system redis.)
+
+
+1) Frontend — Vue 3 (Vite)
+
+Responsibilities:
+
+Capture microphone (MediaStream → AudioWorklet / ScriptProcessor)
+
+Convert Float32 → PCM16 (Int16 little-endian) and send binary frames over WebSocket
+
+Send control messages as JSON (start_session, stop_speaking, end_session, optional user_transcript)
+
+Receive JSON messages (ai_text_delta) and binary audio frames
+
+Play audio in real-time using AudioContext (PCM16 → Float32 → AudioBuffer)
+
+Maintain client UI state: streaming text (currentTurnText), history (assistantText), connection status
+
+Key points:
+
+Set ws.binaryType = "arraybuffer"
+
+Use AudioContext({ sampleRate: 16000 }) if Realtime uses 16k PCM
+
+Implement VAD client-side or use hold-to-talk
+
+2) Backend — Django + Channels + Daphne
+
+Responsibilities:
+
+Accept client WS connections (/ws/voice/?user_id=...)
+
+Manage per-connection session state (user id, conversation session row)
+
+Forward audio bytes to OpenAI Realtime (via backend WebSocket bridge)
+
+Receive streaming events from Realtime, forward transcripts (JSON) and PCM audio (binary) to client
+
+Log conversation events to DB; run memory extraction after session end
+
+Key libraries:
+
+channels (ASGI routing), daphne (ASGI server), channels_redis (channel layer)
+
+DB access:
+
+All ORM calls wrapped via database_sync_to_async(...) in async consumers
+
+Consumer: agent.consumers.VoiceConsumer — one instance per client WS connection
+
+3) Realtime bridge (server → OpenAI Realtime)
+
+Responsibilities:
+
+Create and maintain a WebSocket to OpenAI Realtime endpoint
+
+Send session.update (instructions, input/output audio format, modalities, VAD config)
+
+Send input_audio_buffer.append events (base64 PCM chunk) and input_audio_buffer.commit
+
+Send response.create with instructions (repeat important constraints like language, brevity)
+
+Listen & parse Realtime events:
+
+input_audio_buffer.speech_started
+
+conversation.item.*
+
+response.created, response.content_part.added
+
+response.audio_transcript.delta (spoken text)
+
+response.output_audio.delta / response.audio.delta (base64 PCM)
+
+Decode base64 to bytes and call consumer callbacks (on_text, on_audio_chunk)
+
+Important: event names and payload shapes may vary with API versions — log all events during development.
+
+4) Database & Memory (Django ORM: SQLite for dev, Postgres for prod)
+
+Schemas (core tables):
+
+UserProfile (id, display_name, created_at)
+
+UserMemory (id, user FK, type, content, importance, timestamps)
+
+ConversationSession (id, user FK, started_at, ended_at, title)
+
+ConversationEvent (id, session FK, role, content, created_at)
+
+Memory loop:
+
+Store raw ConversationEvents during session
+
+On end/disconnect: build transcript → call LLM (chat model) to extract memories (JSON) → insert UserMemory rows
