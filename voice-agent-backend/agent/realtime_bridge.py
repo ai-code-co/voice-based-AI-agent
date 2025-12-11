@@ -105,31 +105,7 @@ class RealtimeBridge:
                 print("UNHANDLED EVENT:", event)
 
 
-    # async def _listen_loop(self):
-    #     assert self.ws is not None
-    #     async for msg in self.ws:
-    #         if isinstance(msg, bytes):
-    #             print("WS BYTES FROM REALTIME:", len(msg))
-    #             continue
-
-    #         event = json.loads(msg)
-    #         etype = event.get("type")
-    #         print("REALTIME EVENT:", etype)
-
-    #         # Adjust to the exact event names from the Realtime docs
-    #         if etype == "response.output_text.delta":
-    #             text = event["delta"]["text"]
-    #             await self.on_text(text, False)
-
-    #         elif etype == "response.output_text.completed":
-    #             await self.on_text("", True)
-
-    #         elif etype == "response.audio.delta":
-    #             print("REALTIME ERROR:", event)
-    #             b64 = event["delta"]["audio"]
-    #             pcm = base64.b64decode(b64)
-    #             await self.on_audio_chunk(pcm)
-
+  
 
     async def send_audio_chunk(self, pcm_bytes: bytes):
         assert self.ws is not None
