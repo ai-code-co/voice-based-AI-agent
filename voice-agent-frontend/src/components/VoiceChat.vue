@@ -10,6 +10,7 @@
     <button
       class="mic-btn"
       :disabled="!connected"
+      v-on:click="startRecording"
       @mousedown="startRecording"
       @mouseup="stopRecording"
       @touchstart.prevent="startRecording"
@@ -18,11 +19,18 @@
       <span v-if="!isRecording">Hold to talk 🎤</span>
       <span v-else>Release to send ⏺</span>
     </button>
-
     <div class="transcript">
+  <h3>Assistant says:</h3>
+  <!-- show past turns -->
+  <pre style="color: black;">{{ assistantText }}</pre>
+  <!-- show live streaming text for the current turn -->
+  <p v-if="currentTurnText" style="color: black;" >{{ currentTurnText }}</p>
+</div>
+
+    <!-- <div class="transcript">
       <h3>Assistant says:</h3>
-      <p>{{ assistantText }}</p>
-    </div>
+      <p style="color: black;">{{ assistantText }}</p>
+    </div> -->
   </div>
 </template>
 
@@ -34,7 +42,8 @@ const userId = "user-123"; // replace with real user id / auth
 const ws = ref<WebSocket | null>(null);
 const connected = ref(false);
 const isRecording = ref(false);
-const assistantText = ref("");
+const assistantText = ref("");        // all previous turns (history)
+const currentTurnText = ref("");      // live streaming for THIS reply
 
 let audioCtx: AudioContext | null = null;
 let processor: ScriptProcessorNode | null = null;
@@ -62,39 +71,71 @@ function connectWebSocket() {
 
   socket.onopen = () => {
     connected.value = true;
+    console.log('onopen',connected.value)
     ws.value = socket;
     socket.send(JSON.stringify({ type: "start_session" }));
-  };
-
-  socket.onclose = () => {
-    connected.value = false;
   };
 
   socket.onerror = (e) => {
     console.error("WS error", e);
   };
-
+  
   socket.onmessage = (event) => {
-    if (typeof event.data === "string") {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "ready") {
-        console.log("Backend ready");
-      } else if (msg.type === "ai_text_delta") {
-        if (msg.is_final) {
-          // nothing special here, but you could mark end of sentence
-        } else if (msg.text) {
-          assistantText.value += msg.text;
-        }
-      }
-    } else {
-      // binary audio chunk from backend
-      const buffer = event.data as ArrayBuffer;
-      playPcmChunk(buffer);
+  if (typeof event.data === "string") {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (e) {
+      console.error("Bad JSON from server:", event.data);
+      return;
     }
-  };
+
+    if (msg.type === "ready") {
+      console.log("Backend ready");
+    } else if (msg.type === "ai_text_delta") {
+      if (msg.text) {
+        // streaming text for current reply
+        currentTurnText.value += msg.text;
+      }
+
+      if (msg.is_final) {
+        // one turn is done → move it into history with a newline
+        assistantText.value += (currentTurnText.value.trim() + "\n");
+        currentTurnText.value = "";
+      }
+    }
+  } else {
+    const buffer = event.data as ArrayBuffer;
+    console.log("audio chunk from server:", buffer.byteLength);
+    playPcmChunk(buffer);
+  }
+};
+  
+  // socket.onmessage = (event) => {
+  //   if (typeof event.data === "string") {
+  //     const msg = JSON.parse(event.data);
+  //     if (msg.type === "ready") {
+  //       console.log("Backend ready");
+  //     } else if (msg.type === "ai_text_delta") {
+  //        console.log("AI TEXT DELTA:", msg.text); 
+  //       if (msg.is_final) {
+  //         // nothing special here, but you could mark end of sentence
+  //       } else if (msg.text) {
+  //         assistantText.value += msg.text;
+  //       }
+  //     }
+  //   } else {
+  //     // binary audio chunk from backend
+  //     const buffer = event.data as ArrayBuffer;
+  //     console.log("audio chunk from server:", buffer.byteLength); // 👈 debug
+  //     playPcmChunk(buffer);
+  //   }
+  // };
 }
 
 async function startRecording() {
+   console.log('startRecording',connected.value)
+  
   if (!connected.value || isRecording.value) return;
 
   isRecording.value = true;
