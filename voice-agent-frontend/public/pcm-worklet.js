@@ -1,0 +1,17 @@
+class PCMWorklet extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0][0];
+    if (!input) return true;
+
+    const pcm = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      let s = Math.max(-1, Math.min(1, input[i] * 0.8));
+      pcm[i] = s * 0x7fff;
+    }
+
+    this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    return true;
+  }
+}
+
+registerProcessor("pcm-worklet", PCMWorklet);
