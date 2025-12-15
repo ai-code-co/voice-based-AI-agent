@@ -33,14 +33,18 @@ class RealtimeBridge:
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "OpenAI-Beta": "realtime=v1",
             },
+            max_size=None,
+    ping_interval=20,
         )
 
         session_update = {
             "type": "session.update",
             "session": {
                 "instructions": self.system_instructions,
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
+                # "input_audio_format": "pcm16",
+                # "output_audio_format": "pcm16",
+                 "input_audio_format": {"type": "pcm16", "sample_rate": 16000, "channels": 1},
+        "output_audio_format": {"type": "pcm16", "sample_rate": 16000, "channels": 1},
                 "modalities": ["audio", "text"],
                 "voice": "verse",
             },

@@ -31,6 +31,7 @@ class VoiceConsumer(AsyncJsonWebsocketConsumer):
         self.session = await database_sync_to_async(create_conversation_session)(self.user)
 
         memory_text = "\n".join(f"- {m}" for m in memories) or "- (no previous memories)"
+        print('memory text', memory_text)
         system_instructions = f"""
 You are a friendly real-time voice assistant.
 
@@ -81,7 +82,8 @@ Style:
         )
 
         await self.bridge.connect()
-        await self.send_json({"type": "ready"})
+        # await self.send_json({"type": "ready"})
+        await self.send_json({"type": "audio_format", "sample_rate": 16000, "channels": 1})
 
     async def disconnect(self, close_code):
         # On disconnect, build transcript, update memories
