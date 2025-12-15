@@ -1,3 +1,5 @@
 
 
 voice-agent-backend/.env
+voice-agent-backend/venv
+voice-agent-backend/__pycache__

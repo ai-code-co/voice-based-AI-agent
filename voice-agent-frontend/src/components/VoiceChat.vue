@@ -20,8 +20,8 @@
     </button>
 
     <div class="transcript">
-      <p style="color: black;">{{ currentTurn }}</p>
-      <p style="color: black;">{{ assistantText }}</p>
+      <p>{{ currentTurn }}</p>
+      <p class="assistant">{{ assistantText }}</p>
     </div>
   </div>
 </template>
@@ -29,34 +29,33 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue";
 
-/* -------------------- STATE -------------------- */
-const BACKEND_WS_URL = "ws://localhost:8000/ws/voice";
+const WS_URL = "ws://localhost:8000/ws/voice";
 const userId = "user-123";
 
+/* ---------- STATE ---------- */
 const ws = ref<WebSocket | null>(null);
 const connected = ref(false);
 const recording = ref(false);
+const aiSpeaking = ref(false);
 
 const currentTurn = ref("");
 const assistantText = ref("");
 
-/* -------------------- AUDIO -------------------- */
+/* ---------- AUDIO ---------- */
 let recordCtx: AudioContext | null = null;
 let playCtx: AudioContext | null = null;
-
 let micStream: MediaStream | null = null;
-let sourceNode: MediaStreamAudioSourceNode | null = null;
-let processor: ScriptProcessorNode | null = null;
-
 let playTime = 0;
 
-/* -------------------- LIFECYCLE -------------------- */
-onMounted(connectWS);
-onBeforeUnmount(cleanupAll);
+let ttsSampleRate = 24000;
 
-/* -------------------- WEBSOCKET -------------------- */
+/* ---------- LIFECYCLE ---------- */
+onMounted(connectWS);
+onBeforeUnmount(cleanup);
+
+/* ---------- WEBSOCKET ---------- */
 function connectWS() {
-  const socket = new WebSocket(`${BACKEND_WS_URL}?user_id=${userId}`);
+  const socket = new WebSocket(`${WS_URL}?user_id=${userId}`);
   socket.binaryType = "arraybuffer";
 
   socket.onopen = () => {
@@ -70,43 +69,66 @@ function connectWS() {
     ws.value = null;
   };
 
-  socket.onmessage = (event) => {
-    if (typeof event.data === "string") {
-      const msg = JSON.parse(event.data);
+  socket.onmessage = (e) => {
+    if (typeof e.data === "string") {
+      const msg = JSON.parse(e.data);
+
       if (msg.type === "ai_text_delta") {
-        if (msg.text) currentTurn.value += msg.text;
+        currentTurn.value += msg.text || "";
         if (msg.is_final) {
           assistantText.value += currentTurn.value + "\n";
           currentTurn.value = "";
         }
       }
+
+      if (msg.type === "ai_speaking") {
+        aiSpeaking.value = msg.value;
+      }
+
+      if (msg.type === "sample_rate") {
+        ttsSampleRate = msg.tts;
+      }
       return;
     }
-    playPcm(event.data);
+
+    playPcm(e.data);
   };
 }
 
-/* -------------------- RECORDING -------------------- */
+/* ---------- RECORDING (AudioWorklet) ---------- */
 async function startRecording() {
   if (recording.value) return;
+
+  if (aiSpeaking.value) {
+    ws.value?.send(JSON.stringify({ type: "barge_in" }));
+    stopPlayback();
+  }
+
   recording.value = true;
+  ws.value?.send(JSON.stringify({ type: "start_speaking" }));
 
-  recordCtx = new AudioContext();
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  sourceNode = recordCtx.createMediaStreamSource(micStream);
+  recordCtx = new AudioContext({ sampleRate: 16000 });
+  await recordCtx.audioWorklet.addModule("/pcm-processor.js");
 
-  processor = recordCtx.createScriptProcessor(2048, 1, 1);
-  sourceNode.connect(processor);
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
 
-  const silent = recordCtx.createGain();
-  silent.gain.value = 0;
-  processor.connect(silent);
-  silent.connect(recordCtx.destination);
+  const source = recordCtx.createMediaStreamSource(micStream);
+  const worklet = new AudioWorkletNode(recordCtx, "pcm-processor");
 
-  processor.onaudioprocess = (e) => {
-    const pcm = floatToPCM16(e.inputBuffer.getChannelData(0), 0.8);
-    ws.value?.send(pcm);
+  worklet.port.onmessage = (e) => {
+    if (!ws.value) return;
+    if (ws.value.bufferedAmount < 300_000) {
+      ws.value.send(e.data);
+    }
   };
+
+  source.connect(worklet);
 }
 
 function stopRecording() {
@@ -115,12 +137,6 @@ function stopRecording() {
 
   ws.value?.send(JSON.stringify({ type: "stop_speaking" }));
 
-  processor?.disconnect();
-  processor = null;
-
-  sourceNode?.disconnect();
-  sourceNode = null;
-
   micStream?.getTracks().forEach(t => t.stop());
   micStream = null;
 
@@ -128,10 +144,10 @@ function stopRecording() {
   recordCtx = null;
 }
 
-/* -------------------- PLAYBACK -------------------- */
+/* ---------- PLAYBACK ---------- */
 function ensurePlayCtx() {
   if (!playCtx) {
-    playCtx = new AudioContext(); // native (48kHz)
+    playCtx = new AudioContext();
     playTime = playCtx.currentTime;
   }
 }
@@ -140,7 +156,7 @@ function playPcm(pcm16: ArrayBuffer) {
   ensurePlayCtx();
   const ctx = playCtx!;
 
-  const samples = resamplePCM16(pcm16, 16000, ctx.sampleRate);
+  const samples = resamplePCM16(pcm16, ttsSampleRate, ctx.sampleRate);
   const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
   buffer.getChannelData(0).set(samples);
 
@@ -148,32 +164,22 @@ function playPcm(pcm16: ArrayBuffer) {
   src.buffer = buffer;
   src.connect(ctx.destination);
 
-  const SAFETY = 0.03;
-  if (playTime < ctx.currentTime + SAFETY) {
-    playTime = ctx.currentTime + SAFETY;
-  }
-
+  playTime = Math.max(playTime, ctx.currentTime + 0.03);
   src.start(playTime);
   playTime += buffer.duration;
-
-  src.onended = () => src.disconnect();
 }
 
-/* -------------------- HELPERS -------------------- */
-function floatToPCM16(input: Float32Array, gain = 1) {
-  const buf = new ArrayBuffer(input.length * 2);
-  const view = new DataView(buf);
-  for (let i = 0; i < input.length; i++) {
-    let s = Math.max(-1, Math.min(1, input[i] * gain));
-    view.setInt16(i * 2, s * 0x7fff, true);
-  }
-  return buf;
+function stopPlayback() {
+  playCtx?.close();
+  playCtx = null;
 }
 
+/* ---------- HELPERS ---------- */
 function resamplePCM16(pcm: ArrayBuffer, srcRate: number, dstRate: number) {
   const input = new Int16Array(pcm);
   const ratio = dstRate / srcRate;
   const out = new Float32Array(Math.floor(input.length * ratio));
+
   for (let i = 0; i < out.length; i++) {
     const idx = i / ratio;
     const i0 = Math.floor(idx);
@@ -184,9 +190,9 @@ function resamplePCM16(pcm: ArrayBuffer, srcRate: number, dstRate: number) {
   return out;
 }
 
-function cleanupAll() {
+function cleanup() {
   stopRecording();
-  playCtx?.close();
+  stopPlayback();
   ws.value?.close();
 }
 </script>
@@ -205,12 +211,14 @@ function cleanupAll() {
   border: none;
   background: #2563eb;
   color: white;
-  cursor: pointer;
 }
 .transcript {
   margin-top: 1rem;
   background: #f9fafb;
   padding: 1rem;
   border-radius: 0.75rem;
+}
+.assistant {
+  opacity: 0.8;
 }
 </style>
