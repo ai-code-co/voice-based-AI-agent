@@ -1,30 +1,54 @@
 <template>
-  <div class="voice-chat">
-    <h2>Voice Agent</h2>
+  <div class="page">
+    <div class="card">
+      <!-- Timer -->
+      <div class="timer">00:00</div>
 
-    <div class="status">
-      <span v-if="connected">🟢 Connected</span>
-      <span v-else>🔴 Connecting...</span>
-    </div>
+      <!-- Avatar -->
+      <div class="avatar">
+        <div class="orb"></div>
+      </div>
 
-    <button
-      class="mic-btn"
-      :disabled="!connected"
-      @mousedown.prevent="startRecording"
-      @mouseup.prevent="stopRecording"
-      @touchstart.prevent="startRecording"
-      @touchend.prevent="stopRecording"
-    >
-      <span v-if="!recording">Hold to talk 🎤</span>
-      <span v-else>Release to send ⏺</span>
-    </button>
+      <!-- Title -->
+      <h2 class="title">Eleven</h2>
+      <p class="subtitle">Your ElevenLabs assistant</p>
 
-    <div class="transcript">
-      <p style="color: black;">{{ currentTurn }}</p>
-      <p class="assistant" style="color: black;">{{ assistantText }}</p>
+      <!-- Controls -->
+      <div class="controls">
+        <button class="icon-btn">🇺🇸</button>
+
+        <button
+          class="icon-btn mic"
+          :class="{ active: recording }"
+          :disabled="!connected"
+          @mousedown.prevent="startRecording"
+          @mouseup.prevent="stopRecording"
+          @touchstart.prevent="startRecording"
+          @touchend.prevent="stopRecording"
+        >
+          🎤
+        </button>
+
+        <button class="call-btn">📞</button>
+      </div>
+
+      <!-- Status -->
+      <p class="status-text">
+        <span v-if="connected">Connected</span>
+        <span v-else>Connecting…</span>
+      </p>
+
+      <!-- Transcript -->
+      <div class="transcript">
+        <p class="user" style="color: black;">{{ currentTurn }}</p>
+        <p class="assistant" style="color: black;">{{ assistantText }}</p>
+      </div>
     </div>
   </div>
 </template>
+
+
+
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue";
@@ -221,4 +245,125 @@ function cleanup() {
 .assistant {
   opacity: 0.8;
 }
+
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f6f7fb;
+}
+
+.card {
+  width: 360px;
+  padding: 2rem 1.5rem;
+  border-radius: 24px;
+  background: #ffffff;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+.timer {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 1rem;
+}
+
+/* Avatar */
+.avatar {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.orb {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 30% 30%,
+    #7dd3fc,
+    #2563eb
+  );
+  animation: spin 6s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0.25rem 0 1.5rem;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: #e5e7eb;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.mic.active {
+  background: #2563eb;
+  color: white;
+}
+
+.call-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: none;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.status-text {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-bottom: 1rem;
+}
+
+/* Transcript */
+.transcript {
+  background: #f9fafb;
+  padding: 0.75rem;
+  border-radius: 12px;
+  max-height: 120px;
+  overflow-y: auto;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.user {
+  font-weight: 500;
+}
+
+.assistant {
+  opacity: 0.75;
+}
+
 </style>
